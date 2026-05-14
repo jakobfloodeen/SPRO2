@@ -18,6 +18,7 @@
 #include <util/delay.h>
 #include <stdio.h>
 #include "ina219.h"
+#include <avr/interrupt.h>
 
 /* --------------------------------------------------------------------------
  * Minimal UART for debug output (9600 baud, 8N1)
@@ -30,6 +31,7 @@
 #define TIME_CONSTANT (F_CPU / PRESCALER) // 15625 ticks/sec
 #define HOLES_PER_REV 10
 #define MAX_BUFFER_SIZE 20
+#define Averaging_Window 5
 
 volatile uint16_t last_time0 = 0;
 volatile uint16_t last_time1 = 0;
@@ -37,6 +39,9 @@ volatile float rps0[MAX_BUFFER_SIZE];
 volatile float rps1[MAX_BUFFER_SIZE];
 volatile uint8_t index0 = 0;
 volatile uint8_t index1 = 0;
+
+float average (float*, uint8_t, uint8_t);
+
 // End of optocoupler Definitions + storage
 
 static void uart_init(void)
@@ -113,17 +118,15 @@ int main(void)
 
     printf("Calibration done. Entering measurement loop...\n\n");
 
-     uint16_t average_rps;
-
 
 // Optocoupler Main
   // --- Initilizations some may not be needed ---
-  io_redirect(); // redirect input and output to the communication
-  usart_init();
+  //io_redirect(); // redirect input and output to the communication
+  //usart_init();
   // i2c_init(); // initialize I2C communication
 
-  // --- Timer/counter0 initilization --- 64 ticks per second
-  // Set the Timer0 Mode to Normal
+  // --- Timer/counter1 initilization --- 64 ticks per second
+  // Set the Timer1 Mode to Normal
   TCCR1A = 0x00;
   TCCR1B = (1 << CS12) | (1 << CS10); // prescaler 1024, noise canceling, rising edge
 
@@ -199,4 +202,23 @@ ISR(INT1_vect)
     rps1[index1] = (float)TIME_CONSTANT / (elapsed1 * HOLES_PER_REV);
   }
 }
+
+float average (float rps[], uint8_t index, uint8_t window_size)
+{
+    uint8_t offset = 0;
+    float sum = 0.0;
+
+    for (int i = 0; i < window_size; i++)
+    {
+        if (i > index)
+        {
+            offset = MAX_BUFFER_SIZE;
+        }
+
+        sum += rps[offset + index - i];
+    }
+
+    return sum/window_size;
+}
+
 //End of Optocoupler Functions + Interupts
