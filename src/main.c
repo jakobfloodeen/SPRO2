@@ -25,20 +25,19 @@
 #define BAUD      9600UL
 #define UBRR_VAL  ((F_CPU / (16UL * BAUD)) - 1)
 
+// Optocoupler Definitions + Storage
 #define PRESCALER 1024UL
 #define TIME_CONSTANT (F_CPU / PRESCALER) // 15625 ticks/sec
 #define HOLES_PER_REV 10
-
 #define MAX_BUFFER_SIZE 20
 
 volatile uint16_t last_time0 = 0;
 volatile uint16_t last_time1 = 0;
-
 volatile float rps0[MAX_BUFFER_SIZE];
 volatile float rps1[MAX_BUFFER_SIZE];
-
 volatile uint8_t index0 = 0;
 volatile uint8_t index1 = 0;
+// End of optocoupler Definitions + storage
 
 static void uart_init(void)
 {
@@ -116,10 +115,8 @@ int main(void)
 
      uint16_t average_rps;
 
-  // --- PB5 Arduino light for debugging purposes ---
-  DDRB |= (1 << DDB5); // 1 is output
-  PORTB = 0b00000000;
 
+// Optocoupler Main
   // --- Initilizations some may not be needed ---
   io_redirect(); // redirect input and output to the communication
   usart_init();
@@ -136,6 +133,7 @@ int main(void)
   EIMSK = (1 << INT0) | (1 << INT1); // External Interrupt Request 0 and 1 Enabled
 
   sei(); 
+  // End of Optocoupler Main
 
     /* ------------------------------------------------------------------
      * Measurement loop
@@ -175,6 +173,7 @@ int main(void)
     return 0; /* Never reached */
 }
 
+// Optocoupler Functions + Interupts
 ISR(INT0_vect)
 {
   uint16_t current_time0 = TCNT1; // read time for 1st octocoupler
@@ -200,3 +199,4 @@ ISR(INT1_vect)
     rps1[index1] = (float)TIME_CONSTANT / (elapsed1 * HOLES_PER_REV);
   }
 }
+//End of Optocoupler Functions + Interupts
