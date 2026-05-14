@@ -114,6 +114,29 @@ int main(void)
 
     printf("Calibration done. Entering measurement loop...\n\n");
 
+     uint16_t average_rps;
+
+  // --- PB5 Arduino light for debugging purposes ---
+  DDRB |= (1 << DDB5); // 1 is output
+  PORTB = 0b00000000;
+
+  // --- Initilizations some may not be needed ---
+  io_redirect(); // redirect input and output to the communication
+  usart_init();
+  // i2c_init(); // initialize I2C communication
+
+  // --- Timer/counter0 initilization --- 64 ticks per second
+  // Set the Timer0 Mode to Normal
+  TCCR1A = 0x00;
+  TCCR1B = (1 << CS12) | (1 << CS10); // prescaler 1024, noise canceling, rising edge
+
+  // External Interrupt Control Register A
+  EICRA = (1 << ISC00) | (1 << ISC01) | (1 << ISC10) | (1 << ISC11); // Rising edge, The rising edge of INT1 generates an interrupt request.
+  // External Interrupt Mask Register
+  EIMSK = (1 << INT0) | (1 << INT1); // External Interrupt Request 0 and 1 Enabled
+
+  sei(); 
+
     /* ------------------------------------------------------------------
      * Measurement loop
      * ------------------------------------------------------------------ */
@@ -150,4 +173,30 @@ int main(void)
     }
 
     return 0; /* Never reached */
+}
+
+ISR(INT0_vect)
+{
+  uint16_t current_time0 = TCNT1; // read time for 1st octocoupler
+  uint16_t elapsed0 = current_time0 - last_time0;
+  last_time0 = current_time0;
+
+  if (elapsed0 > 0)
+  {
+    index0 = (index0 + 1) % MAX_BUFFER_SIZE;
+    rps0[index0] = (float)TIME_CONSTANT / (elapsed0 * HOLES_PER_REV);
+  }
+}
+
+ISR(INT1_vect)
+{
+  uint16_t current_time1 = TCNT1; // read time for 2nd octocoupler
+  uint16_t elapsed1 = current_time1 - last_time1;
+  last_time1 = current_time1;
+
+  if (elapsed1 > 0)
+  {
+    index1 = (index1 + 1) % MAX_BUFFER_SIZE;
+    rps1[index1] = (float)TIME_CONSTANT / (elapsed1 * HOLES_PER_REV);
+  }
 }
