@@ -15,16 +15,33 @@
 #define TIME_CONSTANT (F_CPU / PRESCALER) // 15625 ticks/sec
 #define HOLES_PER_REV 10
 #define MAX_BUFFER_SIZE 20
-#define Averaging_Window 5
+#define AVERAGING_WINDOW 5
 #define BAUDRATE 9600
+#define RECORD_NUMBER 10 //has to be less than 100 as it is a percentage
 
+/* OPTO */
 volatile uint16_t last_time0 = 0;
 volatile uint16_t last_time1 = 0;
 volatile float rps0[MAX_BUFFER_SIZE];
 volatile float rps1[MAX_BUFFER_SIZE];
 volatile uint8_t index0 = 0;
 volatile uint8_t index1 = 0;
-volatile uint8_t PWM_duty = 0;
+
+/* MOTOR */
+volatile uint8_t PWM_duty = 100/RECORD_NUMBER;// Starting value 
+
+/* STORAGE */
+volatile float record_voltage[RECORD_NUMBER]; //records to hold "X", for "Y" values
+volatile float record_current[RECORD_NUMBER];
+volatile float record_power_elec[RECORD_NUMBER];
+volatile float record_power_mech[RECORD_NUMBER];
+volatile float record_RPM[RECORD_NUMBER];
+volatile float record_torque[RECORD_NUMBER];
+volatile float record_force[RECORD_NUMBER];
+volatile float record_duty[RECORD_NUMBER];
+
+
+
 
 float average (float*, uint8_t, uint8_t);
 
@@ -60,20 +77,23 @@ int main(void)
 
 
 
-    while(1) //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current
+    while(1) 
     {
-        pwm1_set_duty(PWM_duty);// set duty cycle
-        printf("Voltage %.2f\n", INA219_get_bus_voltage()); //V  
-        printf("Current %.2f\n", INA219_get_current()); //mA
-        average(rps0,index0,Averaging_Window);// average 0
-        average(rps1,index1,Averaging_Window);// average 1
-        _delay_ms(1000);
-        if (PWM_duty < 100){
-          PWM_duty++; // increment duty cycle by 1 each second
-        }
-        else{
-          PWM_duty = 0;
-        }
+      int i;
+      
+      for(i=1; i<=RECORD_NUMBER; i++){        
+        pwm1_set_duty(PWM_duty*i);// set duty cycle
+        record_duty[i] = (PWM_duty*i); // %
+        _delay_ms(500);
+        record_voltage[i] = INA219_get_bus_voltage(); //V  
+        record_current[i] = INA219_get_current(); //mA
+        record_power_elec[i] = INA219_get_power(); //mW
+        record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos) 
+        // record_force[i] = SOME SORT OF ADC CODE FROM NATAS; // N
+        // record_torque[i] = record_force[i] * length; // Nm
+        // record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60) // Nm rads/s
+
+      }
     }
 }
 
