@@ -5,6 +5,7 @@
 #include "I2C.h"
 #include "ina219.h"
 #include "uart.h"
+#include "motor.h"
 
 
 
@@ -23,6 +24,7 @@ volatile float rps0[MAX_BUFFER_SIZE];
 volatile float rps1[MAX_BUFFER_SIZE];
 volatile uint8_t index0 = 0;
 volatile uint8_t index1 = 0;
+volatile uint8_t PWM_duty = 0;
 
 float average (float*, uint8_t, uint8_t);
 
@@ -36,6 +38,7 @@ int main(void)
     UART_EnablePrintf();
     TWIInit(100000); // (100kHz)
     INA219_init();
+    pwm1_init();
 
    
 
@@ -57,13 +60,20 @@ int main(void)
 
 
 
-    while(1)
+    while(1) //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current
     {
+        pwm1_set_duty(PWM_duty);// set duty cycle
         printf("Voltage %.2f\n", INA219_get_bus_voltage()); //V  
         printf("Current %.2f\n", INA219_get_current()); //mA
         average(rps0,index0,Averaging_Window);// average 0
         average(rps1,index1,Averaging_Window);// average 1
         _delay_ms(1000);
+        if (PWM_duty < 100){
+          PWM_duty++; // increment duty cycle by 1 each second
+        }
+        else{
+          PWM_duty = 0;
+        }
     }
 }
 
