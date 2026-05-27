@@ -6,6 +6,7 @@
 #include "ina219.h"
 #include "uart.h"
 #include "motor.h"
+#include "adc.h"
 
 
 
@@ -55,9 +56,8 @@ int main(void)
     sei(); 
     // End of Optocoupler Main
 
-
-
-
+    adc_init();
+    
 
 
     while(1) //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current
