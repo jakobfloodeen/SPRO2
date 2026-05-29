@@ -226,3 +226,4 @@ void nextion_update_results2(const MeasurementLog *log) {
 void nextion_update_end(uint16_t runtime_s) {
     CMD("runtimer.val=%d", runtime_s);
 }
+

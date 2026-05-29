@@ -7,7 +7,7 @@
 #include "uart.h"
 #include "motor.h"
 #include "adc.h"
-//#include "nextion.h"
+#include "nextion.h"
 
 
 
@@ -21,6 +21,8 @@
 #define AVERAGING_WINDOW 5
 #define BAUDRATE 9600
 #define RECORD_NUMBER 10 //keep less than 100
+
+
 
 /* OPTO */
 /* OPTO */
@@ -47,6 +49,10 @@ volatile float record_duty[RECORD_NUMBER];
 volatile uint16_t isr0_count = 0;
 volatile uint16_t isr1_count = 0;
 
+/* NEXTION */
+volatile uint8_t PAGE_NUMBER = 0; 
+volatile uint16_t nextion_resistance = 500; // PRE VALUE
+volatile uint8_t nextion_weight = 50 ;// PRE VALUE
 
 
 
@@ -66,7 +72,7 @@ int main(void)
     INA219_init();
     pwm1_init();
     adc_init();
-    //nextion_init();
+    nextion_init();
    
 
     // --- Timer/counter1 initilization --- 64 ticks per second
@@ -83,34 +89,110 @@ int main(void)
     // End of Optocoupler Main
 
     // Start of Nextion Main
- 
+    
+    switch (PAGE_NUMBER) {
+      case 0:
+        if(nextion_read_action() == 0x01) {
+          PAGE_NUMBER = 2;
+        }
+        break;
+      case 2:
+        if(nextion_read_action()==01){
+          PAGE_NUMBER = 2;
+        }
+        break;
+      case 3:
+        if(nextion_read_action()== 0x09){
+          PAGE_NUMBER = 4;
+        }
+        if(nextion_read_action()== 0x05){
+          nextion_weight+=10;
+        }
+        if(nextion_read_action()== 0x06){
+          nextion_weight+=1;
+        }
+        if(nextion_read_action()== 0x07){
+          nextion_weight-=10;
+        }
+        if(nextion_read_action()== 0x08){
+          nextion_weight-=1;
+        }
+        break;
+      case 4:
+        if(nextion_read_action()== 0x0A){
+          PAGE_NUMBER = 5;
+        }
+        break;
+      case 5:
+        if(nextion_read_action()== 0x0B){
+          PAGE_NUMBER = 6;
+          while(1) //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
+          {      
+            for(int i=0; i<RECORD_NUMBER; i++){        
+        
+             // pwm1_set_duty(PWM_duty*i);// set duty cycle
+              // record_duty[i] = (PWM_duty*i); // %
+              _delay_ms(500);
+              // record_voltage[i] = INA219_get_bus_voltage(); //V  
+              // record_current[i] = INA219_get_current(); //mA
+              // record_power_elec[i] = INA219_get_power(); //mW
+              record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
+              printf("%f\n",record_RPM[i]);
+              printf("ISR0: %u, ISR1: %u\n", isr0_count, isr1_count);
+              //record_force[i] = adc_read(); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
+            
+              //printf("%.4f\n", adc_to_voltage(adc_read()));
 
+              // record_torque[i] = record_force[i] * length;
+              // record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60)
 
+            }
+          break;
+          }
+        }
+        break;
+      case 6:
+        if(nextion_read_action()== 0x0C){
+          PAGE_NUMBER = 7;
+        }
+        break;
+      case 7:
+        if(nextion_read_action()== 0x0D){
+          PAGE_NUMBER = 8;
+        }
+        break;
+      case 8:
+        if(nextion_read_action()== 0x0E){
+          PAGE_NUMBER = 7;
+        }
+        if(nextion_read_action()== 0x0F){
+          PAGE_NUMBER = 9;
+        }
+        break;
+      case 9:
+        if(nextion_read_action()== 0x10){
+          PAGE_NUMBER = 8;
+        }
+        //if(nextion_read_action()== 0x11){
+        //  PAGE_NUMBER = 7; SAVE THE DATA USING SD CARD COMP.
+        //}
+        if(nextion_read_action()== 0x12){
+          PAGE_NUMBER = 2;
+        }
+        break;
+      default: break; 
 
-
-    while(1) //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
-    {      
-      for(int i=0; i<RECORD_NUMBER; i++){        
-        // pwm1_set_duty(PWM_duty*i);// set duty cycle
-        // record_duty[i] = (PWM_duty*i); // %
-        _delay_ms(500);
-        // record_voltage[i] = INA219_get_bus_voltage(); //V  
-        // record_current[i] = INA219_get_current(); //mA
-        // record_power_elec[i] = INA219_get_power(); //mW
-        record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
-        printf("%f\n",record_RPM[i]);
-        printf("ISR0: %u, ISR1: %u\n", isr0_count, isr1_count);
-         //record_force[i] = adc_read(); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
-       
-        //printf("%.4f\n", adc_to_voltage(adc_read()));
-
-        // record_torque[i] = record_force[i] * length;
-        // record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60)
-
-      }
     }
-}
 
+
+
+
+
+
+    if (nextion_read_action() == 0x0B){ // CHECKS TO SEE IF PROGRAM GETS STARTED
+    
+  }
+}
 
  // Optocoupler Functions + Interupts
 ISR(INT0_vect)
