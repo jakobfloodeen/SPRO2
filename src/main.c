@@ -6,6 +6,8 @@
 #include "ina219.h"
 #include "uart.h"
 #include "motor.h"
+#include "adc.h"
+//#include "nextion.h"
 
 
 
@@ -15,18 +17,42 @@
 #define TIME_CONSTANT (F_CPU / PRESCALER) // 15625 ticks/sec
 #define HOLES_PER_REV 10
 #define MAX_BUFFER_SIZE 20
-#define Averaging_Window 5
+#define AVERAGING_WINDOW 5
+#define AVERAGING_WINDOW 5
 #define BAUDRATE 9600
+#define RECORD_NUMBER 10 //keep less than 100
 
+/* OPTO */
+/* OPTO */
 volatile uint16_t last_time0 = 0;
 volatile uint16_t last_time1 = 0;
 volatile float rps0[MAX_BUFFER_SIZE];
 volatile float rps1[MAX_BUFFER_SIZE];
 volatile uint8_t index0 = 0;
 volatile uint8_t index1 = 0;
-volatile uint8_t PWM_duty = 0;
 
-float average (float*, uint8_t, uint8_t);
+/* MOTOR */
+volatile uint8_t PWM_duty = 100/RECORD_NUMBER;// Starting value 
+
+/* STORAGE */
+volatile float record_voltage[RECORD_NUMBER]; //records to hold "X", for "Y" values
+volatile float record_current[RECORD_NUMBER];
+volatile float record_power_elec[RECORD_NUMBER];
+volatile float record_power_mech[RECORD_NUMBER];
+volatile float record_RPM[RECORD_NUMBER];
+volatile float record_torque[RECORD_NUMBER];
+volatile float record_force[RECORD_NUMBER];
+volatile float record_duty[RECORD_NUMBER];
+
+volatile uint16_t isr0_count = 0;
+volatile uint16_t isr1_count = 0;
+
+
+
+
+
+
+float average (volatile float*, uint8_t, uint8_t);
 
 // End of Definitions + storage
 
@@ -39,7 +65,8 @@ int main(void)
     TWIInit(100000); // (100kHz)
     INA219_init();
     pwm1_init();
-
+    adc_init();
+    //nextion_init();
    
 
     // --- Timer/counter1 initilization --- 64 ticks per second
@@ -55,25 +82,32 @@ int main(void)
     sei(); 
     // End of Optocoupler Main
 
+    // Start of Nextion Main
+ 
 
 
 
 
+    while(1) //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
+    {      
+      for(int i=0; i<RECORD_NUMBER; i++){        
+        // pwm1_set_duty(PWM_duty*i);// set duty cycle
+        // record_duty[i] = (PWM_duty*i); // %
+        _delay_ms(500);
+        // record_voltage[i] = INA219_get_bus_voltage(); //V  
+        // record_current[i] = INA219_get_current(); //mA
+        // record_power_elec[i] = INA219_get_power(); //mW
+        record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
+        printf("%f\n",record_RPM[i]);
+        printf("ISR0: %u, ISR1: %u\n", isr0_count, isr1_count);
+         //record_force[i] = adc_read(); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
+       
+        //printf("%.4f\n", adc_to_voltage(adc_read()));
 
-    while(1) //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current
-    {
-        pwm1_set_duty(PWM_duty);// set duty cycle
-        printf("Voltage %.2f\n", INA219_get_bus_voltage()); //V  
-        printf("Current %.2f\n", INA219_get_current()); //mA
-        average(rps0,index0,Averaging_Window);// average 0
-        average(rps1,index1,Averaging_Window);// average 1
-        _delay_ms(1000);
-        if (PWM_duty < 100){
-          PWM_duty++; // increment duty cycle by 1 each second
-        }
-        else{
-          PWM_duty = 0;
-        }
+        // record_torque[i] = record_force[i] * length;
+        // record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60)
+
+      }
     }
 }
 
@@ -81,11 +115,12 @@ int main(void)
  // Optocoupler Functions + Interupts
 ISR(INT0_vect)
 {
+  isr0_count++;
   uint16_t current_time0 = TCNT1; // read time for 1st octocoupler
   uint16_t elapsed0 = current_time0 - last_time0;
   last_time0 = current_time0;
 
-  if (elapsed0 > 0)
+  if (elapsed0 > 50)
   {
     index0 = (index0 + 1) % MAX_BUFFER_SIZE;
     rps0[index0] = (float)TIME_CONSTANT / (elapsed0 * HOLES_PER_REV);
@@ -94,18 +129,21 @@ ISR(INT0_vect)
 
 ISR(INT1_vect)
 {
+  isr1_count++;
   uint16_t current_time1 = TCNT1; // read time for 2nd octocoupler
   uint16_t elapsed1 = current_time1 - last_time1;
   last_time1 = current_time1;
 
-  if (elapsed1 > 0)
+
+  
+  if (elapsed1 > 50)
   {
     index1 = (index1 + 1) % MAX_BUFFER_SIZE;
     rps1[index1] = (float)TIME_CONSTANT / (elapsed1 * HOLES_PER_REV);
   }
 }
 
-float average (float rps[], uint8_t index, uint8_t window_size)
+float average (volatile float rps[], uint8_t index, uint8_t window_size)
 {
     uint8_t offset = 0;
     float sum = 0.0;
