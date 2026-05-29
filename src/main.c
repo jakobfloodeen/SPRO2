@@ -18,9 +18,11 @@
 #define HOLES_PER_REV 10
 #define MAX_BUFFER_SIZE 20
 #define AVERAGING_WINDOW 5
+#define AVERAGING_WINDOW 5
 #define BAUDRATE 9600
 #define RECORD_NUMBER 10 //keep less than 100
 
+/* OPTO */
 /* OPTO */
 volatile uint16_t last_time0 = 0;
 volatile uint16_t last_time1 = 0;
