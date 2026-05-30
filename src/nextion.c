@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <util/delay.h>
+#include <usart.h>
 
 #define NUMBER_STRING 1001
 #define SET 2001
@@ -53,6 +54,10 @@ void set_property(char component[], char property[], int val) {
   printf("%s.%s=%d%c%c%c", component, property, val, 255, 255, 255);
 }
 
+void set_str_property(char component[], char property[], char val[]){
+    printf("%s.%s=\"%s\"%c%c%c", component, property, val, 255, 255, 255);
+}
+
 void set_page(int index) {
   printf("page %d%c%c%c", index, 255, 255, 255); // init at 9600 baud.
   _delay_ms(20);
@@ -68,6 +73,7 @@ void echo_serial(void) {
     printf("%c", UDR0);
   }
 }
+
 char read_value(void) {
   char readBuffer[20];
   int typeExpected = 0;
@@ -77,6 +83,7 @@ char read_value(void) {
   while (!uart_read_byte(&byte)) {
     ; // wait for incoming byte
   }
+
 
   readBuffer[0] = byte;
 
@@ -142,6 +149,8 @@ char read_value(void) {
         return 0xa;
       } else if (readValue == 2) { // back button
         return 0xb;
+      } else if (readValue == 3) {
+        return 0xd;
       } else if (readValue == 0x00) {
         return 0xc;
       }

@@ -17,6 +17,7 @@ void init_display(void);
 
 void set_value(char component[], int val);
 void set_property(char component[], char property[], int val);
+void set_str_property(char component[], char property[], char val[]);
 
 void set_page(int index);
 

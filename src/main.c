@@ -4,7 +4,7 @@
 #include <avr/interrupt.h>
 #include "I2C.h"
 #include "ina219.h"
-#include "uart.h"
+#include "uSart.h"
 #include "motor.h"
 #include "adc.h"
 #include "nextion.h"
@@ -33,25 +33,25 @@ volatile uint8_t index0 = 0;
 volatile uint8_t index1 = 0;
 
 /* MOTOR */
-volatile uint8_t PWM_duty = 100/RECORD_NUMBER;// Starting value 
+uint8_t PWM_duty = 100/RECORD_NUMBER;// Starting value 
 
 /* STORAGE */
-volatile float record_voltage[RECORD_NUMBER]; //records to hold "X", for "Y" values
-volatile float record_current[RECORD_NUMBER];
-volatile float record_power_elec[RECORD_NUMBER];
-volatile float record_power_mech[RECORD_NUMBER];
-volatile float record_RPM[RECORD_NUMBER];
-volatile float record_torque[RECORD_NUMBER];
-volatile float record_force[RECORD_NUMBER];
-volatile float record_duty[RECORD_NUMBER];
+float record_voltage[RECORD_NUMBER]; //records to hold "X", for "Y" values
+float record_current[RECORD_NUMBER];
+float record_power_elec[RECORD_NUMBER];
+float record_power_mech[RECORD_NUMBER];
+float record_RPM[RECORD_NUMBER];
+float record_torque[RECORD_NUMBER];
+float record_force[RECORD_NUMBER];
+float record_duty[RECORD_NUMBER];
 
 volatile uint16_t isr0_count = 0;
 volatile uint16_t isr1_count = 0;
 
 /* NEXTION */
-volatile uint8_t PAGE_NUMBER = 0; 
-volatile uint16_t nextion_resistance = 500; // PRE VALUE
-volatile uint8_t nextion_weight = 50 ;// PRE VALUE
+uint8_t PAGE_NUMBER = 0; 
+uint16_t nextion_resistance = 500; // PRE VALUE
+uint8_t nextion_weight = 50 ;// PRE VALUE
 
 
 
@@ -65,32 +65,91 @@ float average (volatile float*, uint8_t, uint8_t);
 
 int main(void)
 {
-    USART_Init(BAUDRATE);
-    UART_EnablePrintf();
+  uart_init();
+  
+  init_display();
     TWIInit(100000); // (100kHz)
     INA219_init();
     pwm1_init();
     adc_init();
-    init_display();
+    
    
 
-    // --- Timer/counter1 initilization --- 64 ticks per second
-    // Set the Timer1 Mode to Normal
-    TCCR1A = 0x00;
-    TCCR1B = (1 << CS12) | (1 << CS10); // prescaler 1024, noise canceling, rising edge
+    // // --- Timer/counter1 initilization --- 64 ticks per second
+    // // Set the Timer1 Mode to Normal
+    // TCCR1A = 0x00;
+    // TCCR1B = (1 << CS12) | (1 << CS10); // prescaler 1024, noise canceling, rising edge
 
-    // External Interrupt Control Register A
-    EICRA = (1 << ISC00) | (1 << ISC01) | (1 << ISC10) | (1 << ISC11); // Rising edge, The rising edge of INT1 generates an interrupt request.
-    // External Interrupt Mask Register
-    EIMSK = (1 << INT0) | (1 << INT1); // External Interrupt Request 0 and 1 Enabled
+    // // External Interrupt Control Register A
+    // EICRA = (1 << ISC00) | (1 << ISC01) | (1 << ISC10) | (1 << ISC11); // Rising edge, The rising edge of INT1 generates an interrupt request.
+    // // External Interrupt Mask Register
+    // EIMSK = (1 << INT0) | (1 << INT1); // External Interrupt Request 0 and 1 Enabled
 
-    sei(); 
+    // sei(); 
     // End of Optocoupler Main
 
     // Start of Nextion Main
     while(1){
 
+      uint8_t cont = 0;
 
+      // echo_serial();
+
+      // weight screen
+      
+      while (!cont) {
+        uint8_t action = read_value();
+        switch (action)
+        {
+        case 0xd:
+          nextion_weight = get_value("n0");
+          set_page(3);
+          cont = 1;
+          break;
+        
+        default:
+          break;
+        }
+        _delay_ms(25);
+      }
+
+      // resistance screen
+      cont = 0;
+      do {
+        uint8_t action = read_value();
+        switch (action)
+        {
+        case 0xd:
+          nextion_resistance = get_value("n0");
+          set_page(4);
+          cont = 1;
+          break;
+        
+        default:
+          break;
+        }
+      } while (!cont);
+
+      // safety and start screen
+      cont = 0;
+      do {
+        uint8_t action = read_value();
+        switch (action)
+        {
+        case 0xa:
+          set_page(6);
+          cont = 1;
+          break;
+        
+        default:
+          break;
+        }
+      } while (!cont);
+
+      set_value("runtimer", 999);
+      set_str_property("t0", "txt", "hey");
+
+// UPDATE RUN SCREEN vvvvvvv
       
            //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
           
@@ -112,6 +171,7 @@ int main(void)
 
             }
           
+            // DISPLAY RESULTS
           
         
     }
