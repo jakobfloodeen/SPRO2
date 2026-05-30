@@ -7,6 +7,7 @@
 #include "uart.h"
 #include <avr/interrupt.h>
 #include <avr/io.h>
+#include <math.h>
 #include <stdio.h>
 #include <util/delay.h>
 
@@ -19,6 +20,15 @@
 #define BAUDRATE 9600
 #define RECORD_NUMBER 10 // keep less than 100
 #define LENGTH 0.047     // Length of arm that force travels on
+
+// Logging fields
+#define F_ANGV 0
+#define F_TORQUE 1
+#define F_EFF 2
+#define F_VOLT 3
+#define F_AMP 4
+#define F_EPWR 5
+#define F_MPWR 6
 
 /* OPTO */
 /* OPTO */
@@ -72,6 +82,11 @@ int main(void) {
   pwm1_init();
   adc_init();
   nextion_init();
+
+  static const char header[] = "a_v,tor,eff,vol,amp,epw,mpw";
+  sd_logger_init(header);
+
+  float row[LOG_FIELDS];
 
   // uint8_t row_count = 0;
   // static char row[] = "1,2,3";
@@ -170,7 +185,19 @@ int main(void) {
           record_torque[i] = record_force[i] * LENGTH;
           record_power_mech[i] =
               record_torque[i] * ((record_RPM[i] * 2 * 3.1415) / 60);
+
+          row[F_ANGV] = record_RPM[i];
+          row[F_TORQUE] = record_torque[i];
+          row[F_EFF] = record_power_mech[i] / record_power_elec[i];
+          row[F_VOLT] = record_voltage[i];
+          row[F_EPWR] = record_power_elec[i];
+          row[F_MPWR] = record_power_mech[i];
+
+          sd_logger_write_row(row);
+          _delay_ms(1000); // delay for writing to sd card
         }
+
+        sd_logger_close();
       }
       break;
     case 6:
