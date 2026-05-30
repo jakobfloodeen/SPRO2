@@ -1,138 +1,250 @@
-/**
- * example.c – Usage example for the INA219 driver on an ATmega328P
- *
- * Hardware assumptions:
- *   - 16 MHz crystal
- *   - INA219 with A0=GND, A1=GND  → address 0x40
- *   - 100 mΩ (0.1 Ω) shunt resistor
- *   - Maximum expected current: 3.2 A
- *   - UART at 9600 baud for debug output (TX = PD1)
- *
- * Compile with avr-gcc, e.g.:
- *   avr-gcc -mmcu=atmega328p -DF_CPU=16000000UL -Os \
- *           -o example.elf example.c ina219.c
- *   avr-objcopy -O ihex example.elf example.hex
- */
-
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdio.h>
+#include <avr/interrupt.h>
+#include "I2C.h"
 #include "ina219.h"
+#include "uart.h"
+#include "motor.h"
+#include "adc.h"
+#include "nextion.h"
 
-/* --------------------------------------------------------------------------
- * Minimal UART for debug output (9600 baud, 8N1)
- * -------------------------------------------------------------------------- */
-#define BAUD      9600UL
-#define UBRR_VAL  ((F_CPU / (16UL * BAUD)) - 1)
 
-static void uart_init(void)
-{
-    UBRR0H = (uint8_t)(UBRR_VAL >> 8);
-    UBRR0L = (uint8_t)(UBRR_VAL);
-    UCSR0B = (1 << TXEN0);
-    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);  /* 8 data bits */
-}
 
-static void uart_putc(char c)
-{
-    while (!(UCSR0A & (1 << UDRE0)));
-    UDR0 = (uint8_t)c;
-}
 
-static int uart_putchar(char c, FILE *stream)
-{
-    (void)stream;
-    if (c == '\n') uart_putc('\r');
-    uart_putc(c);
-    return 0;
-}
+// Definitions + Storage
+#define PRESCALER 1024UL
+#define TIME_CONSTANT (F_CPU / PRESCALER) // 15625 ticks/sec
+#define HOLES_PER_REV 10
+#define MAX_BUFFER_SIZE 20
+#define AVERAGING_WINDOW 5
+#define BAUDRATE 9600
+#define RECORD_NUMBER 10 //keep less than 100
+#define LENGTH 0.047//Length of arm that force travels on
 
-static FILE uart_stdout = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
 
-/* --------------------------------------------------------------------------
- * Main
- * -------------------------------------------------------------------------- */
+/* OPTO */
+/* OPTO */
+volatile uint16_t last_time0 = 0;
+volatile uint16_t last_time1 = 0;
+volatile float rps0[MAX_BUFFER_SIZE];
+volatile float rps1[MAX_BUFFER_SIZE];
+volatile uint8_t index0 = 0;
+volatile uint8_t index1 = 0;
+
+/* MOTOR */
+volatile uint8_t PWM_duty = 100/RECORD_NUMBER;// Starting value 
+
+/* STORAGE */
+volatile float record_voltage[RECORD_NUMBER]; //records to hold "X", for "Y" values
+volatile float record_current[RECORD_NUMBER];
+volatile float record_power_elec[RECORD_NUMBER];
+volatile float record_power_mech[RECORD_NUMBER];
+volatile float record_RPM[RECORD_NUMBER];
+volatile float record_torque[RECORD_NUMBER];
+volatile float record_force[RECORD_NUMBER];
+volatile float record_duty[RECORD_NUMBER];
+
+volatile uint16_t isr0_count = 0;
+volatile uint16_t isr1_count = 0;
+
+/* NEXTION */
+volatile uint8_t PAGE_NUMBER = 0; 
+volatile uint16_t nextion_resistance = 500; // PRE VALUE
+volatile uint8_t nextion_weight = 50 ;// PRE VALUE
+
+
+
+
+
+float average (volatile float*, uint8_t, uint8_t);
+
+// End of Definitions + storage
+
+// Main
+
 int main(void)
 {
-    uart_init();
-    stdout = &uart_stdout;
+    USART_Init(BAUDRATE);
+    UART_EnablePrintf();
+    TWIInit(100000); // (100kHz)
+    INA219_init();
+    pwm1_init();
+    adc_init();
+    nextion_init();
+   
 
-    printf("INA219 driver example\n");
+    // --- Timer/counter1 initilization --- 64 ticks per second
+    // Set the Timer1 Mode to Normal
+    TCCR1A = 0x00;
+    TCCR1B = (1 << CS12) | (1 << CS10); // prescaler 1024, noise canceling, rising edge
 
-    /* ------------------------------------------------------------------
-     * Initialise the device handle and the TWI peripheral
-     * ------------------------------------------------------------------ */
-    ina219_t sensor;
-    ina219_err_t err = ina219_init(&sensor, INA219_ADDR_GND_GND);
-    if (err != INA219_OK) {
-        printf("ina219_init failed: %d\n", err);
-        while (1);
-    }
+    // External Interrupt Control Register A
+    EICRA = (1 << ISC00) | (1 << ISC01) | (1 << ISC10) | (1 << ISC11); // Rising edge, The rising edge of INT1 generates an interrupt request.
+    // External Interrupt Mask Register
+    EIMSK = (1 << INT0) | (1 << INT1); // External Interrupt Request 0 and 1 Enabled
 
-    /* ------------------------------------------------------------------
-     * Optional: custom configuration
-     *   - 32 V bus range
-     *   - ±320 mV shunt range (PGA = /8, suitable for 100 mΩ at 3.2 A)
-     *   - 12-bit ADC, 128-sample averaging (68 ms per conversion)
-     *   - Continuous shunt + bus measurement
-     * ------------------------------------------------------------------ */
-    uint16_t cfg = INA219_CFG_BRNG_32V
-                 | INA219_CFG_PG_320MV
-                 | INA219_CFG_BADC_128AVG
-                 | INA219_CFG_SADC_128AVG
-                 | INA219_CFG_MODE_SHUNT_BUS_CONT;
+    sei(); 
+    // End of Optocoupler Main
 
-    err = ina219_configure(&sensor, cfg);
-    if (err != INA219_OK) {
-        printf("ina219_configure failed: %d\n", err);
-        while (1);
-    }
+    // Start of Nextion Main
+    while(1){
 
-    /* ------------------------------------------------------------------
-     * Calibrate for a 100 mΩ shunt, max 3.2 A
-     * ------------------------------------------------------------------ */
-    err = ina219_calibrate(&sensor, 0.1f, 3.2f);
-    if (err != INA219_OK) {
-        printf("ina219_calibrate failed: %d\n", err);
-        while (1);
-    }
+      printf("%i 0xFF 0xFF 0xFF",PAGE_NUMBER);
+      
+    switch (PAGE_NUMBER) {
+      case 0:
+        if(nextion_read_action() == 0x01) {
+          PAGE_NUMBER = 2;
+          
+        }
+        break;
+      case 2:
+        if(nextion_read_action()==01){
+          PAGE_NUMBER = 2;
+        }
+        break;
+      case 3:
+        if(nextion_read_action()== 0x09){
+          PAGE_NUMBER = 4;          
+        }
+        if(nextion_read_action()== 0x05){
+          nextion_weight+=10;
+          printf("IT IS BEING READ 0xFF 0xFF 0xFF");
+        }
+        if(nextion_read_action()== 0x06){
+          nextion_weight+=1;
+        }
+        if(nextion_read_action()== 0x07){
+          nextion_weight-=10;
+        }
+        if(nextion_read_action()== 0x08){
+          nextion_weight-=1;
+        }
+        break;
+      case 4:
+        if(nextion_read_action()== 0x0A){
+          PAGE_NUMBER = 5;
+        }
+        break;
+      case 5:
+        if(nextion_read_action()== 0x0B){
+          PAGE_NUMBER = 6;
+           //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
+          
+             for(int i=0; i<RECORD_NUMBER; i++){        
+        
+              pwm1_set_duty(PWM_duty*i);// set duty cycle
+              record_duty[i] = (PWM_duty*i); // %
+              _delay_ms(500);
+              record_voltage[i] = INA219_get_bus_voltage(); //V  
+              record_current[i] = INA219_get_current(); //mA
+              record_power_elec[i] = INA219_get_power(); //mW
+              record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
+              
 
-    printf("Calibration done. Entering measurement loop...\n\n");
 
-    /* ------------------------------------------------------------------
-     * Measurement loop
-     * ------------------------------------------------------------------ */
-    while (1) {
-        /* Wait for a fresh conversion */
-        bool ready = false;
-        uint8_t retries = 100;
-        do {
-            _delay_ms(1);
-            err = ina219_conversion_ready(&sensor, &ready);
-            if (err != INA219_OK) {
-                printf("conversion_ready error: %d\n", err);
-                break;
+              
+              record_force[i] = adc_to_voltage(adc_read()); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
+            
+              //printf("%.4f\n", adc_to_voltage(adc_read()));
+
+              record_torque[i] = record_force[i] * LENGTH;
+              record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60);
+
             }
-        } while (!ready && --retries);
+          
+          
+        }
+        break;
+      case 6:
+        if(nextion_read_action()== 0x0C){
+          PAGE_NUMBER = 7;
+        }
+        break;
+      case 7:
+        if(nextion_read_action()== 0x0D){
+          PAGE_NUMBER = 8;
+        }
+        break;
+      case 8:
+        if(nextion_read_action()== 0x0E){
+          PAGE_NUMBER = 7;
+        }
+        if(nextion_read_action()== 0x0F){
+          PAGE_NUMBER = 9;
+        }
+        break;
+      case 9:
+        if(nextion_read_action()== 0x10){
+          PAGE_NUMBER = 8;
+        }
+        //if(nextion_read_action()== 0x11){
+        //  PAGE_NUMBER = 7; SAVE THE DATA USING SD CARD COMP.
+        //}
+        if(nextion_read_action()== 0x12){
+          PAGE_NUMBER = 2;
+        }
+        break;
+      default: break; 
 
-        /* Read all measurements in one call */
-        int32_t  shunt_uV = 0;
-        uint16_t bus_mV   = 0;
-        int32_t  cur_mA   = 0;
-        uint32_t pwr_mW   = 0;
+    }
 
-        err = ina219_read_all(&sensor, &shunt_uV, &bus_mV, &cur_mA, &pwr_mW);
-        if (err == INA219_ERR_OVERFLOW) {
-            printf("WARNING: Math overflow – check calibration / shunt range\n");
-        } else if (err != INA219_OK) {
-            printf("ina219_read_all error: %d\n", err);
-        } else {
-            printf("Shunt: %ld uV  Bus: %u mV  Current: %ld mA  Power: %lu mW\n",
-                   shunt_uV, bus_mV, cur_mA, pwr_mW);
+
+
+
+
+
+    
+}
+  }
+ // Optocoupler Functions + Interupts
+ISR(INT0_vect)
+{
+  isr0_count++;
+  uint16_t current_time0 = TCNT1; // read time for 1st octocoupler
+  uint16_t elapsed0 = current_time0 - last_time0;
+  last_time0 = current_time0;
+
+  if (elapsed0 > 50)
+  {
+    index0 = (index0 + 1) % MAX_BUFFER_SIZE;
+    rps0[index0] = (float)TIME_CONSTANT / (elapsed0 * HOLES_PER_REV);
+  }
+}
+
+ISR(INT1_vect)
+{
+  isr1_count++;
+  uint16_t current_time1 = TCNT1; // read time for 2nd octocoupler
+  uint16_t elapsed1 = current_time1 - last_time1;
+  last_time1 = current_time1;
+
+
+  
+  if (elapsed1 > 50)
+  {
+    index1 = (index1 + 1) % MAX_BUFFER_SIZE;
+    rps1[index1] = (float)TIME_CONSTANT / (elapsed1 * HOLES_PER_REV);
+  }
+}
+
+float average (volatile float rps[], uint8_t index, uint8_t window_size)
+{
+    uint8_t offset = 0;
+    float sum = 0.0;
+
+    for (int i = 0; i < window_size; i++)
+    {
+        if (i > index)
+        {
+            offset = MAX_BUFFER_SIZE;
         }
 
-        _delay_ms(50);
+        sum += rps[offset + index - i];
     }
 
-    return 0; /* Never reached */
+    return sum/window_size;
 }
+
+//End of Optocoupler Functions + Interupts
