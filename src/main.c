@@ -69,7 +69,7 @@ int main(void)
   
   init_display();
     TWIInit(100000); // (100kHz)
-    //INA219_init();
+    INA219_init();
     pwm1_init();
     adc_init();
     
@@ -153,7 +153,7 @@ int main(void)
 // UPDATE RUN SCREEN vvvvvvv
       
            //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
-          int display_value = 0;
+              int display_value = 0;
              for(int i=0; i<RECORD_NUMBER; i++){        
               
               set_value("runtimer", display_value);
@@ -163,16 +163,16 @@ int main(void)
               record_duty[i] = (PWM_duty*i); // %
               _delay_ms(1000);
               display_value++;
-              //record_voltage[i] = INA219_get_bus_voltage(); //V  
-              //record_current[i] = INA219_get_current(); //mA
-              //record_power_elec[i] = INA219_get_power(); //mW
-              //record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
-              //record_force[i] = adc_to_voltage(adc_read()); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
+              record_voltage[i] = INA219_get_bus_voltage(); //V  
+              record_current[i] = INA219_get_current(); //mA
+              record_power_elec[i] = INA219_get_power(); //mW
+              record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
+              record_force[i] = adc_to_voltage(adc_read()); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
             
               //printf("%.4f\n", adc_to_voltage(adc_read()));
 
-              //record_torque[i] = record_force[i] * LENGTH;
-              //record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60);
+              record_torque[i] = record_force[i] * LENGTH;
+              record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60);
 
             }
             set_page(7);
@@ -182,33 +182,63 @@ int main(void)
             // DISPLAY RESULTS
           
             //RECORDS RPM
-            for(int i=0; i<RECORD_NUMBER; i++){
-              char location[] = "n1";
-              set_value(location+i, record_RPM[i]);
+            for (int i = 0; i < RECORD_NUMBER; i++) {
+              char location[4];   
+
+              location[0] = 'n';
+              location[1] = '1';
+              location[2] = '0' + i;
+              location[3] = '\0';
+
+              set_value(location, record_RPM[i]);
               _delay_ms(25);
             }
             //RECORDS TORQUE
-            for(int i=0; i<RECORD_NUMBER; i++){
-              char location[] = "n2";
-              set_value(location+i, record_torque[i]);
+            for (int i = 0; i < RECORD_NUMBER; i++) {
+              char location[4];   
+
+              location[0] = 'n';
+              location[1] = '2';
+              location[2] = '0' + i;
+              location[3] = '\0';
+
+              set_value(location, record_torque[i]);
               _delay_ms(25);
             }
             //RECORDS force
-            for(int i=0; i<RECORD_NUMBER; i++){
-              char location[] = "n3";
-              set_value(location+i, record_force[i]);
+            for (int i = 0; i < RECORD_NUMBER; i++) {
+              char location[4];   
+
+              location[0] = 'n';
+              location[1] = '3';
+              location[2] = '0' + i;
+              location[3] = '\0';
+
+              set_value(location, record_force[i]);
               _delay_ms(25);
             }
             //RECORDS MAX V
-            for(int i=0; i<RECORD_NUMBER; i++){
-              char location[] = "n4";
-              set_value(location+i, record_RPM[i]);
+            for (int i = 0; i < RECORD_NUMBER; i++) {
+              char location[4];   
+
+              location[0] = 'n';
+              location[1] = '4';
+              location[2] = '0' + i;
+              location[3] = '\0';
+
+              set_value(location, record_voltage[i]);
               _delay_ms(25);
             }
             //RECORDS MAX A
-            for(int i=0; i<RECORD_NUMBER; i++){
-              char location[] = "n5";
-              set_value(location+i, record_RPM[i]);
+            for (int i = 0; i < RECORD_NUMBER; i++) {
+              char location[4];   
+
+              location[0] = 'n';
+              location[1] = '5';
+              location[2] = '0' + i;
+              location[3] = '\0';
+
+              set_value(location, record_current[i]);
               _delay_ms(25);
             }
 
@@ -228,6 +258,34 @@ int main(void)
                 break;
               }
             } while (!cont);
+
+            //RECORDS ELEC-POWER
+            for (int i = 0; i < RECORD_NUMBER; i++) {
+              char location[4];   
+
+              location[0] = 'n';
+              location[1] = '1';
+              location[2] = '0' + i;
+              location[3] = '\0';
+
+              set_value(location, record_power_elec[i]);
+              _delay_ms(25);
+            }
+            
+            //RECORDS MECH-POWER
+            for (int i = 0; i < RECORD_NUMBER; i++) {
+              char location[4];   
+
+              location[0] = 'n';
+              location[1] = '2';
+              location[2] = '0' + i;
+              location[3] = '\0';
+
+              set_value(location, record_power_mech[i]);
+              _delay_ms(25);
+            }
+
+
 
             //FROM PAGE 8 to PAGE 9
             cont = 0;
