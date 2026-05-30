@@ -71,7 +71,7 @@ int main(void)
     INA219_init();
     pwm1_init();
     adc_init();
-    nextion_init();
+    init_display();
    
 
     // --- Timer/counter1 initilization --- 64 ticks per second
@@ -90,46 +90,8 @@ int main(void)
     // Start of Nextion Main
     while(1){
 
-      printf("%i 0xFF 0xFF 0xFF",PAGE_NUMBER);
+
       
-    switch (PAGE_NUMBER) {
-      case 0:
-        if(nextion_read_action() == 0x01) {
-          PAGE_NUMBER = 2;
-          
-        }
-        break;
-      case 2:
-        if(nextion_read_action()==01){
-          PAGE_NUMBER = 2;
-        }
-        break;
-      case 3:
-        if(nextion_read_action()== 0x09){
-          PAGE_NUMBER = 4;          
-        }
-        if(nextion_read_action()== 0x05){
-          nextion_weight+=10;
-          printf("IT IS BEING READ 0xFF 0xFF 0xFF");
-        }
-        if(nextion_read_action()== 0x06){
-          nextion_weight+=1;
-        }
-        if(nextion_read_action()== 0x07){
-          nextion_weight-=10;
-        }
-        if(nextion_read_action()== 0x08){
-          nextion_weight-=1;
-        }
-        break;
-      case 4:
-        if(nextion_read_action()== 0x0A){
-          PAGE_NUMBER = 5;
-        }
-        break;
-      case 5:
-        if(nextion_read_action()== 0x0B){
-          PAGE_NUMBER = 6;
            //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
           
              for(int i=0; i<RECORD_NUMBER; i++){        
@@ -141,10 +103,6 @@ int main(void)
               record_current[i] = INA219_get_current(); //mA
               record_power_elec[i] = INA219_get_power(); //mW
               record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
-              
-
-
-              
               record_force[i] = adc_to_voltage(adc_read()); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
             
               //printf("%.4f\n", adc_to_voltage(adc_read()));
@@ -155,39 +113,7 @@ int main(void)
             }
           
           
-        }
-        break;
-      case 6:
-        if(nextion_read_action()== 0x0C){
-          PAGE_NUMBER = 7;
-        }
-        break;
-      case 7:
-        if(nextion_read_action()== 0x0D){
-          PAGE_NUMBER = 8;
-        }
-        break;
-      case 8:
-        if(nextion_read_action()== 0x0E){
-          PAGE_NUMBER = 7;
-        }
-        if(nextion_read_action()== 0x0F){
-          PAGE_NUMBER = 9;
-        }
-        break;
-      case 9:
-        if(nextion_read_action()== 0x10){
-          PAGE_NUMBER = 8;
-        }
-        //if(nextion_read_action()== 0x11){
-        //  PAGE_NUMBER = 7; SAVE THE DATA USING SD CARD COMP.
-        //}
-        if(nextion_read_action()== 0x12){
-          PAGE_NUMBER = 2;
-        }
-        break;
-      default: break; 
-
+        
     }
 
 
@@ -197,7 +123,7 @@ int main(void)
 
     
 }
-  }
+  
  // Optocoupler Functions + Interupts
 ISR(INT0_vect)
 {
