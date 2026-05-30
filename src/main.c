@@ -69,23 +69,23 @@ int main(void)
   
   init_display();
     TWIInit(100000); // (100kHz)
-    INA219_init();
+    //INA219_init();
     pwm1_init();
     adc_init();
     
    
 
-    // // --- Timer/counter1 initilization --- 64 ticks per second
-    // // Set the Timer1 Mode to Normal
-    // TCCR1A = 0x00;
-    // TCCR1B = (1 << CS12) | (1 << CS10); // prescaler 1024, noise canceling, rising edge
+    // --- Timer/counter1 initilization --- 64 ticks per second
+    // Set the Timer1 Mode to Normal
+    TCCR1A = 0x00;
+    TCCR1B = (1 << CS12) | (1 << CS10); // prescaler 1024, noise canceling, rising edge
 
-    // // External Interrupt Control Register A
-    // EICRA = (1 << ISC00) | (1 << ISC01) | (1 << ISC10) | (1 << ISC11); // Rising edge, The rising edge of INT1 generates an interrupt request.
-    // // External Interrupt Mask Register
-    // EIMSK = (1 << INT0) | (1 << INT1); // External Interrupt Request 0 and 1 Enabled
+    // External Interrupt Control Register A
+    EICRA = (1 << ISC00) | (1 << ISC01) | (1 << ISC10) | (1 << ISC11); // Rising edge, The rising edge of INT1 generates an interrupt request.
+    // External Interrupt Mask Register
+    EIMSK = (1 << INT0) | (1 << INT1); // External Interrupt Request 0 and 1 Enabled
 
-    // sei(); 
+    sei(); 
     // End of Optocoupler Main
 
     // Start of Nextion Main
@@ -145,34 +145,106 @@ int main(void)
           break;
         }
       } while (!cont);
-
-      set_value("runtimer", 999);
+      
+      
+      
       set_str_property("t0", "txt", "hey");
 
 // UPDATE RUN SCREEN vvvvvvv
       
            //increases duty cycle for PWM by 1 each second and measures RPM, Voltage, Current and pressure on FSR
-          
+          int display_value = 0;
              for(int i=0; i<RECORD_NUMBER; i++){        
-        
+              
+              set_value("runtimer", display_value);
+
+
               pwm1_set_duty(PWM_duty*i);// set duty cycle
               record_duty[i] = (PWM_duty*i); // %
-              _delay_ms(500);
-              record_voltage[i] = INA219_get_bus_voltage(); //V  
-              record_current[i] = INA219_get_current(); //mA
-              record_power_elec[i] = INA219_get_power(); //mW
-              record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
-              record_force[i] = adc_to_voltage(adc_read()); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
+              _delay_ms(1000);
+              display_value++;
+              //record_voltage[i] = INA219_get_bus_voltage(); //V  
+              //record_current[i] = INA219_get_current(); //mA
+              //record_power_elec[i] = INA219_get_power(); //mW
+              //record_RPM[i] = (average(rps0,index0,AVERAGING_WINDOW) + average(rps1,index1,AVERAGING_WINDOW))/2;// RPM (average of both optos)
+              //record_force[i] = adc_to_voltage(adc_read()); //value from 0 - (2^16)-1 (max is 5V). 1 = 0.07629394531mV, (2^16)-1 = 5000mV
             
               //printf("%.4f\n", adc_to_voltage(adc_read()));
 
-              record_torque[i] = record_force[i] * LENGTH;
-              record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60);
+              //record_torque[i] = record_force[i] * LENGTH;
+              //record_power_mech[i] = record_torque[i] * ((record_RPM[i]*2*3.1415)/60);
 
             }
-          
+            set_page(7);
+            pwm1_set_duty(0);
+            
+            
             // DISPLAY RESULTS
           
+            //RECORDS RPM
+            for(int i=0; i<RECORD_NUMBER; i++){
+              char location[] = "n1";
+              set_value(location+i, record_RPM[i]);
+              _delay_ms(25);
+            }
+            //RECORDS TORQUE
+            for(int i=0; i<RECORD_NUMBER; i++){
+              char location[] = "n2";
+              set_value(location+i, record_torque[i]);
+              _delay_ms(25);
+            }
+            //RECORDS force
+            for(int i=0; i<RECORD_NUMBER; i++){
+              char location[] = "n3";
+              set_value(location+i, record_force[i]);
+              _delay_ms(25);
+            }
+            //RECORDS MAX V
+            for(int i=0; i<RECORD_NUMBER; i++){
+              char location[] = "n4";
+              set_value(location+i, record_RPM[i]);
+              _delay_ms(25);
+            }
+            //RECORDS MAX A
+            for(int i=0; i<RECORD_NUMBER; i++){
+              char location[] = "n5";
+              set_value(location+i, record_RPM[i]);
+              _delay_ms(25);
+            }
+
+
+            //FROM PAGE 7 to PAGE 8
+            cont = 0;
+            do {
+              uint8_t action = read_value();
+              switch (action)
+              {
+              case 0xd:
+                set_page(8);
+                cont = 1;
+                break;
+              
+              default:
+                break;
+              }
+            } while (!cont);
+
+            //FROM PAGE 8 to PAGE 9
+            cont = 0;
+            do {
+              uint8_t action = read_value();
+              switch (action)
+              {
+              case 0xd:
+                set_page(9);
+                cont = 1;
+                break;
+              
+              default:
+                break;
+              }
+            } while (!cont);
+
         
     }
 

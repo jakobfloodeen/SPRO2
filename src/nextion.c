@@ -153,6 +153,8 @@ char read_value(void) {
         return 0xd;
       } else if (readValue == 0x00) {
         return 0xc;
+      } else if (readValue == 5) {//result page 1, send to page 2
+        return 0xd;
       }
     }
     break;
