@@ -3,13 +3,8 @@
  *
  * Original Author: jpsteph
  * Fixes:
-<<<<<<< HEAD
- *   - writeINA(): corrected low-byte mask from (u16data | 0xFF) to (u16data &
-0xFF)
-=======
  *   - writeINA(): corrected low-byte mask from (u16data | 0xFF) to (u16data &
  * 0xFF)
->>>>>>> f0b9d74 (housekeeping)
  *   - get_bus_voltage() renamed to INA219_get_bus_voltage() for consistency
  * Added:
  *   - INA219_get_power(): returns power in mW (V * I)

@@ -165,3 +165,9 @@ void UART_EnablePrintf(void)
 {
 	stdout = &uart_stdout;
 }
+
+FILE f_uart = FDEV_SETUP_STREAM(uart_putchar, uart_ge)
+
+void io_redirect(void) {
+	stdout = 
+}

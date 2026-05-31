@@ -1,228 +1,286 @@
-/**
- * nextion.c — Nextion display driver for SPRO2 Motor Test Stand
- *
- * Component IDs from Nextion Editor attribute panel:
- *
- *  Page 0  start        b1  id=2   → Done
- *  Page 1  error        (no buttons)
- *  Page 2  weights_in   n0  id=6   weight count display
- *                       b2  id=4   → minus
- *                       b3  id=5   → plus
- *                       b1  id=1   → Next
- *  Page 3  resistance   n0  id=2   resistance value display
- *                       b0  id=3   → +10
- *                       b3  id=6   → +1
- *                       b2  id=5   → -10
- *                       b4  id=7   → -1
- *                       b1  id=4   → Next
- *  Page 4  safety       b0  id=1   → yes
- *  Page 5  Start_test   b0  id=2   → Start
- *  Page 6  Test         runtimer id=2
- *                       b0  id=3   → Next
- *  Page 7  Results1     b0  id=7   → Next
- *                       RPM    column: n10(id=18)..n19(id=27)
- *                       Torque column: n20(id=28)..n29(id=37)
- *                       Ef%    column: n30(id=38)..n39(id=47)
- *                       MaxV   column: n40(id=48)..n49(id=57)
- *                       MaxA   column: n50(id=58)..n59(id=67)
- *  Page 8  Results2     b0  id=1   → Back
- *                       b1  id=3   → Next
- *                       Power     column: n10(id=16)..n19(id=25)
- *                       MechPower column: n20(id=26)..n29(id=35)
- *  Page 9  end          runtimer id=2
- *                       b0  id=5   → Back
- *                       b1  id=4   → Restart
- *                       b2  id=3   → Save
- */
-
 #include "nextion.h"
 #include <avr/interrupt.h>
 #include <avr/io.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <uart.h>
 #include <util/delay.h>
+#include <usart.h>
 
-// ── UART ring buffer ──────────────────────────────────────────────────────────
-#define RX_BUFFER_SIZE 64
-static volatile uint8_t rx_buffer[RX_BUFFER_SIZE];
-static volatile uint8_t rx_head = 0;
-static volatile uint8_t rx_tail = 0;
+#define NUMBER_STRING 1001
+#define SET 2001
+#define SET_SCREEN 2002
+#define CONTROL 3001
 
-// Every Nextion command must end with three 0xFF bytes
-#define CMD(...) printf(__VA_ARGS__); printf("%c%c%c", 0xFF, 0xFF, 0xFF)
+#define PACKET_LEN 5
+#define RX_BUFFER_SIZE 32
 
-// ── ISR: store every incoming byte into the ring buffer ───────────────────────
-ISR(USART_RX_vect) {
-    uint8_t byte = UDR0;
-    uint8_t next = (rx_head + 1) % RX_BUFFER_SIZE;
-    if (next != rx_tail) {
-        rx_buffer[rx_head] = byte;
-        rx_head = next;
-    }
+volatile uint8_t rx_buffer[RX_BUFFER_SIZE];
+volatile uint8_t rx_head = 0;
+volatile uint8_t rx_tail = 0;
+
+static char readValue;
+volatile uint8_t control_packet_flag = 0;
+
+// int read_value(void);
+
+int uart_read_byte(uint8_t *byte);
+
+void clear_buffer(void) {
+  while (UCSR0A & (1 << RXC0)) {
+    (void)UDR0;
+  }
 }
 
-// ── Read one byte from the ring buffer (0 = empty, 1 = byte written to *byte) ─
-int nextion_uart_read_byte(uint8_t *byte) {
-    if (rx_tail == rx_head) return 0;
-    *byte = rx_buffer[rx_tail];
-    rx_tail = (rx_tail + 1) % RX_BUFFER_SIZE;
+void init_display(void) {
+  UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);
+  UCSR0C = (1 << UCSZ01) | (1 << UCSZ00); // 8N1
+  sei();
+  io_redirect(); // redirect input and output to the communication
+  set_page(0);
+  readValue = 0;
+}
+
+int get_value(char component[]) {
+  printf("get %s.val%c%c%c", component, 255, 255, 255);
+  return read_value();
+}
+
+void set_value(char component[], int val) {
+  printf("%s.val=%d%c%c%c", component, val, 255, 255, 255);
+}
+
+void set_property(char component[], char property[], int val) {
+  printf("%s.%s=%d%c%c%c", component, property, val, 255, 255, 255);
+}
+
+void set_str_property(char component[], char property[], char val[]){
+    printf("%s.%s=\"%s\"%c%c%c", component, property, val, 255, 255, 255);
+}
+
+void set_page(int index) {
+  printf("page %d%c%c%c", index, 255, 255, 255); // init at 9600 baud.
+  _delay_ms(20);
+}
+
+void echo_serial(void) {
+  // char input;
+  while (1) {
+    if (!(UCSR0A & (1 << RXC0))) {
+      continue;
+    }
+    // scanf("%c", &input);
+    printf("%c", UDR0);
+  }
+}
+
+char read_value(void) {
+  char readBuffer[20];
+  int typeExpected = 0;
+  readValue = 0;
+
+  uint8_t byte;
+  while (!uart_read_byte(&byte)) {
+    ; // wait for incoming byte
+  }
+
+
+  readBuffer[0] = byte;
+
+  switch (byte) {
+  case 0x71:
+    typeExpected = NUMBER_STRING;
+    break;
+  case 0x11:
+    typeExpected = CONTROL;
+    break;
+  case 0x33:
+    typeExpected = SET;
+    break;
+  case 0x32:
+    typeExpected = SET_SCREEN;
+    break;
+  case 0x1A:
+    for (int j = 0; j < 3; j++) {
+      while (!uart_read_byte(&byte))
+        ; // clear out tail
+    }
+    break;
+  default:
+    break;
+  }
+
+  int packetLength = (typeExpected == NUMBER_STRING) ? 8 : 5;
+  for (int i = 1; i < packetLength; i++) {
+    while (!uart_read_byte(&byte))
+      ;
+    readBuffer[i] = byte;
+  }
+
+  switch (typeExpected) {
+  case NUMBER_STRING:
+    if (readBuffer[0] == 0x71 && readBuffer[5] == -1 && readBuffer[6] == -1 &&
+        readBuffer[7] == -1) // This is a complete number return
+    {
+      readValue = readBuffer[1] | (readBuffer[2] << 8) | (readBuffer[3] << 16) |
+                  (readBuffer[4] << 24);
+    }
+    break;
+  case SET:
+    if (readBuffer[0] == 0x33 && readBuffer[2] == -1 && readBuffer[3] == -1 &&
+        readBuffer[4] == -1) // This is a complete number return
+    {
+      readValue = readBuffer[1];
+    }
+    break;
+  case SET_SCREEN:
+    if (readBuffer[0] == 0x32 && readBuffer[2] == -1 && readBuffer[3] == -1 &&
+        readBuffer[4] == -1) // This is a complete number return
+    {
+      readValue = readBuffer[1];
+    }
+    break;
+  case CONTROL:
+    if (readBuffer[0] == 0x11 && readBuffer[2] == -1 && readBuffer[3] == -1 &&
+        readBuffer[4] == -1) // This is a complete number return
+    {
+      readValue = readBuffer[1];
+      if (readValue == 1) { // start button
+        return 0xa;
+      } else if (readValue == 2) { // back button
+        return 0xb;
+      } else if (readValue == 3) {
+        return 0xd;
+      } else if (readValue == 0x00) {
+        return 0xc;
+      } else if (readValue == 5) {//result page 1, send to page 2
+        return 0xd;
+      }
+    }
+    break;
+
+  default:
+    break;
+  }
+
+  return readValue;
+}
+
+fixed read_numpad(void) {
+  int numberBuffer[20];
+  int index = 0;
+
+  fixed number;
+  number.i_number = 0;
+  number.f_number = 0;
+  number.decimalPlace = 0; // place of decimal point from the right
+
+  char receivingNumbers = 1;
+
+  while (receivingNumbers) {
+
+    char action = read_value();
+    switch (action) {
+    case 0x11:
+      numberBuffer[index] = -1;
+      index++;
+      break;
+    case 0x12:
+      index--;
+      break;
+    case 0xb:
+      receivingNumbers = 0;
+      break;
+    default:
+      numberBuffer[index] = action;
+      index++;
+      break;
+    }
+
+    int multiplier = 1.0;
+    int count = 0;
+    number.i_number = 0;
+    for (int i = index - 1; i >= 0; i--) {
+      if (numberBuffer[i] == -1) {
+        number.decimalPlace = count;
+      } else {
+        number.i_number += (float)numberBuffer[i] * multiplier;
+        multiplier *= 10;
+        count++;
+      }
+    }
+
+    set_value("inpnum", number.i_number);
+    set_property("inpnum", "vvs1", number.decimalPlace);
+  }
+
+  if (number.decimalPlace == 0)
+    number.f_number = (float)number.i_number;
+  else
+    number.f_number = (float)number.i_number / pow(10, number.decimalPlace);
+
+  return number;
+}
+
+void update_run_screen(uint16_t distance, uint16_t time, uint16_t velocity) {
+  // update the each component on the screen
+  // (in proper units)
+
+  set_property("rundistance", "val", distance);
+  set_property("rundistance", "vvs1", 1); // mm -> cm
+
+  set_property("runtime", "val", time);
+  set_property("runtime", "vvs1", 2); // 1/100 s -> s
+
+  set_property("runvelocity", "val", velocity);
+  set_property("runvelocity", "vvs1", 1);
+}
+
+void update_main_page(fixed distance, fixed time) {
+  set_value("distance", distance.i_number);
+  set_property("distance", "vvs1", distance.decimalPlace);
+  set_value("time", time.i_number);
+  set_property("time", "vvs1", time.decimalPlace);
+}
+
+// From ChatGPT
+int check_run_end(void) {
+  if (control_packet_flag) {
+    control_packet_flag = 0;
     return 1;
+  }
+  return 0;
 }
 
-// ── Consume bytes until three consecutive 0xFF bytes are seen ────────────────
-static void flush_to_end(void) {
-    uint8_t ff = 0, byte;
-    while (ff < 3)
-        if (nextion_uart_read_byte(&byte))
-            ff = (byte == 0xFF) ? ff + 1 : 0;
-}
+ISR(USART_RX_vect) {
+  uint8_t next = (rx_head + 1) % RX_BUFFER_SIZE;
+  uint8_t byte = UDR0; // Read the byte immediately
 
-// ── Init: set up UART at 9600 baud, enable RX interrupt, redirect printf ──────
-void nextion_init(void) {
-    USART_Init(9600);                                        // baud rate + TX/RX
-    UCSR0B = (1 << RXEN0) | (1 << TXEN0) | (1 << RXCIE0);  // enable RX interrupt
-    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);                 // 8-N-1
-    //UART_EnablePrintf();                                     // printf → UART (not needed in current use)
-    sei();                                                  // (not needed)
-    _delay_ms(500);
-    nextion_clear_buffer();
-    nextion_set_page(PAGE_START);
-}
+  if (next != rx_tail) { // prevent overflow
+    rx_buffer[rx_head] = byte;
+    rx_head = next;
+  }
 
-// ── Flush hardware FIFO and reset the software ring buffer ───────────────────
-void nextion_clear_buffer(void) {
-    while (UCSR0A & (1 << RXC0)) (void)UDR0;
-    rx_head = rx_tail = 0;
-}
+  static const uint8_t expected[PACKET_LEN] = {0x11, 0x00, 0xFF, 0xFF, 0xFF};
+  static uint8_t idx = 0;
 
-// ── Navigate to a page; 50 ms pause lets the display finish loading ───────────
-void nextion_set_page(uint8_t page) {
-    CMD("page %d", page);
-    _delay_ms(50);
-}
-
-// ── Parse the next touch-press packet from the ring buffer ───────────────────
-// Nextion packet format: [0x65][page_id][component_id][0x01=press][FF FF FF]
-// Both page_id AND component_id are used — IDs are not unique across pages.
-uint8_t nextion_read_action(void) {
-    uint8_t byte;
-    if (!nextion_uart_read_byte(&byte)) return ACTION_NONE;
-
-    if (byte != 0x65) { flush_to_end(); return ACTION_NONE; }
-
-    uint8_t pkt[6];
-    uint8_t got = 0;
-    uint16_t timeout = 20000;
-    while (got < 6 && timeout--)
-        if (nextion_uart_read_byte(&pkt[got])) got++;
-    if (got < 6) return ACTION_NONE;
-
-    uint8_t page_id      = pkt[0];
-    uint8_t component_id = pkt[1];
-    uint8_t event        = pkt[2];
-
-    if (event != 0x01) return ACTION_NONE;  // ignore release events
-
-    switch (page_id) {
-        case PAGE_START:                        // page 0
-            if (component_id == 2) return ACTION_DONE;
-            break;
-        case PAGE_WEIGHTS_IN:                   // page 2
-            if (component_id == 4) return ACTION_WEIGHT_MINUS;
-            if (component_id == 5) return ACTION_WEIGHT_PLUS;
-            if (component_id == 1) return ACTION_WEIGHT_NEXT;
-            break;
-        case PAGE_RESISTANCE:                   // page 3
-            if (component_id == 3) return ACTION_RES_PLUS10;
-            if (component_id == 6) return ACTION_RES_PLUS1;
-            if (component_id == 5) return ACTION_RES_MINUS10;
-            if (component_id == 7) return ACTION_RES_MINUS1;
-            if (component_id == 4) return ACTION_RES_NEXT;
-            break;
-        case PAGE_SAFETY:                       // page 4
-            if (component_id == 1) return ACTION_SAFETY_YES;
-            break;
-        case PAGE_START_TEST:                   // page 5
-            if (component_id == 2) return ACTION_START;
-            break;
-        case PAGE_TEST:                         // page 6
-            if (component_id == 3) return ACTION_TEST_NEXT;
-            break;
-        case PAGE_RESULTS1:                     // page 7
-            if (component_id == 7) return ACTION_RESULTS1_NEXT;
-            break;
-        case PAGE_RESULTS2:                     // page 8
-            if (component_id == 1) return ACTION_RESULTS2_BACK;
-            if (component_id == 3) return ACTION_RESULTS2_NEXT;
-            break;
-        case PAGE_END:                          // page 9
-            if (component_id == 5) return ACTION_END_BACK;
-            if (component_id == 4) return ACTION_END_RESTART;
-            if (component_id == 3) return ACTION_END_SAVE;
-            break;
-        default: break;
+  if (byte == expected[idx]) {
+    idx++;
+    if (idx == PACKET_LEN) {
+      control_packet_flag = 1;
+      idx = 0;
     }
-    return ACTION_NONE;
+  } else {
+    idx = (byte == expected[0]) ? 1 : 0;
+  }
 }
 
-// ── Update weight-count number on page 2 (n0, id=6) ──────────────────────────
-void nextion_update_weight_count(uint8_t count) {
-    CMD("n0.val=%d", count);
-}
+int uart_read_byte(uint8_t *byte) {
+  if (rx_tail == rx_head) {
+    return 0; // no data available
+  }
 
-// ── Update resistance value on page 3 (n0, id=2) ─────────────────────────────
-void nextion_update_resistance(uint16_t value) {
-    CMD("n0.val=%d", value);
-}
-
-// ── Update elapsed-time counter on page 6 (runtimer, id=2) ───────────────────
-void nextion_update_runtime(uint16_t seconds) {
-    CMD("runtimer.val=%d", seconds);
-}
-
-// ── Append one row to the log; silently ignores the call when log is full ─────
-void nextion_log_add_row(MeasurementLog *log, const MeasurementRow *row) {
-    if (log->count >= 10) return;
-    log->rows[log->count] = *row;
-    log->count++;
-}
-
-// ── Write all log rows to Results1 (page 7) number grid ──────────────────────
-//
-//  Row i uses components:
-//    n1i (RPM)   n2i (Torque)   n3i (Ef%)   n4i (MaxV)   n5i (MaxA)
-//
-//  Examples: row 0 → n10 n20 n30 n40 n50
-//            row 5 → n15 n25 n35 n45 n55
-//            row 9 → n19 n29 n39 n49 n59
-void nextion_update_results1(const MeasurementLog *log) {
-    uint8_t i;
-    for (i = 0; i < log->count && i < 10; i++) {
-        CMD("n1%d.val=%u", i, log->rows[i].rpm);
-        CMD("n2%d.val=%u", i, log->rows[i].torque_mNm);
-        CMD("n3%d.val=%u", i, log->rows[i].efficiency);
-        CMD("n4%d.val=%u", i, log->rows[i].max_voltage_mV);
-        CMD("n5%d.val=%u", i, log->rows[i].max_current_mA);
-    }
-}
-
-// ── Write all log rows to Results2 (page 8) number grid ──────────────────────
-//
-//  Row i uses components:
-//    n1i (Power)   n2i (MechPower)
-//
-//  Examples: row 0 → n10 n20
-//            row 9 → n19 n29
-void nextion_update_results2(const MeasurementLog *log) {
-    uint8_t i;
-    for (i = 0; i < log->count && i < 10; i++) {
-        CMD("n1%d.val=%u", i, log->rows[i].power_mW);
-        CMD("n2%d.val=%u", i, log->rows[i].mech_power_mW);
-    }
-}
-
-// ── Update elapsed-time counter on page 9 / end (runtimer, id=2) ─────────────
-void nextion_update_end(uint16_t runtime_s) {
-    CMD("runtimer.val=%d", runtime_s);
+  *byte = rx_buffer[rx_tail];
+  rx_tail = (rx_tail + 1) % RX_BUFFER_SIZE;
+  return 1; // byte returned
 }
