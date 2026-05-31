@@ -33,4 +33,6 @@ int USART_Receive_String( char * s);
 
 int USART_cmd(char* str, char* cmd, int size);
 
+void io_redirect(void);
+
 #endif /* UART_H_ */

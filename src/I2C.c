@@ -5,7 +5,7 @@
  */
 
 #include <avr/io.h>
-#include "uart.h"
+#include "usart.h"
 #include "I2C.h"
 
 void TWIInit(uint32_t speed) {
